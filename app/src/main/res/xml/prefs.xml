@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <EditTextPreference
+        android:key="imageCapturePeriod"
+        android:title="Image Capture Period (s)"
+        android:summary="Image Capture Period in seconds"
+        android:numeric="integer"
+        android:defaultValue="10" />
+    <CheckBoxPreference
+        android:key="uploadImages"
+        android:title="Upload Images to a server"
+        android:summary="Upload each image when it is captured"
+        />
+    <EditTextPreference
+        android:key="serverUrl"
+        android:title="URL of server to send images to"
+        android:summary="URL of server to send images to"
+        android:defaultValue="bunnycam.webhop.info/upload.php" />
+    <EditTextPreference
+        android:key="uiUpdatePeriod"
+        android:title="UI Update Period (ms)"
+        android:summary="UI Update Period (ms)"
+        android:numeric="integer"
+        android:defaultValue="1000" />
+
+</PreferenceScreen>
