@@ -15,7 +15,7 @@
         android:key="serverUrl"
         android:title="URL of server to send images to"
         android:summary="URL of server to send images to"
-        android:defaultValue="bunnycam.webhop.info/upload.php" />
+        android:defaultValue="http://bunnycam.webhop.info/upload.php" />
     <EditTextPreference
         android:key="uiUpdatePeriod"
         android:title="UI Update Period (ms)"

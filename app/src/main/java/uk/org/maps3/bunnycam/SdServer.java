@@ -40,6 +40,7 @@ import android.content.res.AssetManager;
 import android.hardware.Camera;
 import android.os.Binder;
 import android.os.Environment;
+import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
@@ -52,13 +53,19 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Iterator;
@@ -75,6 +82,7 @@ import fi.iki.elonen.NanoHTTPD;
  * http://developer.android.com/guide/components/services.html#ExtendingService
  */
 public class SdServer extends Service {
+    private static final int CAMERA_ID = 0;  // Use the device's primary camera.
     public static final int MEDIA_TYPE_IMAGE = 1;
     public static final int MEDIA_TYPE_VIDEO = 2;
     // Notification ID
@@ -86,12 +94,15 @@ public class SdServer extends Service {
     private PowerManager.WakeLock mWakeLock = null;
     private Camera mCamera;
     private Timer mPictureTimer;
+    private boolean mCameraReady = false;
     private int mImageCapturePeriod;
     private boolean mUploadImages;
     private String mServerUrl;
     private WebServer mWebServer = null;
     private String mLatestImageFname = null;
     private byte[] mLatestImage = null;
+
+    private Handler handler;
 
     private final IBinder mBinder = new SdBinder();
 
@@ -128,9 +139,11 @@ public class SdServer extends Service {
      */
     @Override
     public void onCreate() {
+        // Handler will get associated with the current thread,
+        // which is the main thread.
+        handler = new Handler();
+        super.onCreate();
         Log.v(TAG, "onCreate()");
-        // Create a dummy surfaceView for the camera preview.
-        SurfaceView sv = new SurfaceView(getApplicationContext());
 
         // Connect to the Camera
         mCamera = null;
@@ -139,10 +152,22 @@ public class SdServer extends Service {
                 mCamera.release();
                 mCamera = null;
             }
-            mCamera = Camera.open();
+           // int nCameras = Camera.getNumberOfCameras();
+            //Log.v(TAG,"onCreate(): nCameras = "+nCameras);
+            //mCamera = Camera.open(CAMERA_ID);
+            mCamera = Camera.open();  // Just use default camera for compatibility with SDK8.
+            Camera.Parameters params = mCamera.getParameters();
+            Camera.Size previewSize = params.getPreviewSize();
+            Log.v(TAG,"previewSize ="+previewSize.toString()+":- "+previewSize.width+","+previewSize.height);
+            // Create a dummy surfaceView for the camera preview.
+            SurfaceView sv = new SurfaceView(getApplicationContext());
+            sv.getHolder().setFixedSize(previewSize.width,previewSize.height);
+            Log.v(TAG,"Setting preview display - size="+sv.getHolder().toString());
             mCamera.setPreviewDisplay(sv.getHolder());
+            mCameraReady = true;
         } catch (Exception e) {
             Log.e(TAG, "failed to open Camera");
+            mCameraReady = false;
             e.printStackTrace();
         }
         //takePicture();
@@ -153,18 +178,31 @@ public class SdServer extends Service {
                 "MyWakelockTag");
     }
 
+    /*
+    Taken from http://stackoverflow.com/questions/18948251/not-able-to-call-runonuithread-in-a-thread-from-inside-of-a-service
+     */
+    private void runOnUiThread(Runnable runnable) {
+        handler.post(runnable);
+    }
+
 
     private void takePicture() {
         Log.v(TAG, "takePicture()");
         if (mCamera != null) {
-            mCamera.startPreview();
-            mCamera.takePicture(null, null, pictureCallBack);
+            // Only try to take a picture if we have finished taking the previous one.
+            if (mCameraReady) {
+                mCamera.startPreview();
+                mCameraReady = false;
+                Log.v(TAG, "Taking Picture");
+                mCamera.takePicture(null, null, pictureCallBack);
+            } else {
+                Log.v(TAG, "Camera Not Ready - waiting.");
+            }
         } else {
-            Toast toast = Toast.makeText(this, "mCamera is Null!!!", Toast.LENGTH_SHORT);
-            toast.show();
             Log.v(TAG, "mCamera is Null!!!");
         }
     }
+
 
     private Camera.PictureCallback pictureCallBack = new Camera.PictureCallback() {
         public void onPictureTaken(byte[] data, Camera camera) {
@@ -172,27 +210,134 @@ public class SdServer extends Service {
             File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
             if (pictureFile == null) {
                 Log.d(TAG, "Error creating media file, check storage permissions: ");
-                return;
-            }
+            } else {
 
-            try {
-                FileOutputStream fos = new FileOutputStream(pictureFile);
-                fos.write(data);
-                fos.close();
-            } catch (FileNotFoundException e) {
-                Log.d(TAG, "File not found: " + e.getMessage());
-            } catch (IOException e) {
-                Log.d(TAG, "Error accessing file: " + e.getMessage());
+                try {
+                    FileOutputStream fos = new FileOutputStream(pictureFile);
+                    fos.write(data);
+                    fos.close();
+                } catch (FileNotFoundException e) {
+                    Log.d(TAG, "File not found: " + e.getMessage());
+                } catch (IOException e) {
+                    Log.d(TAG, "Error accessing file: " + e.getMessage());
+                }
+                mLatestImageFname = pictureFile.getName();
             }
-            mLatestImageFname = pictureFile.getName();
             mLatestImage = data;
-            if (mUploadImages) uploadImage(pictureFile.getName(), data);
+            mCameraReady = true;
+            if (mUploadImages) {
+                if (pictureFile!=null)
+                    uploadImage(pictureFile.getName(), data);
+                else
+                    uploadImage("unknown", data);
+            }
         }
     };
 
-    private void uploadImage(String pictureFile, byte[] data) {
-        Log.v(TAG, "uploadImage - DOES NOT DO ANYTHING!!!!");
+    /* uploadImage - based on http://androidexample.com/Upload_File_To_Server_-_Android_Example/index.php?view=article_discription&aid=83&aaid=106
+     */
+    private int uploadImage(String pictureFile, byte[] data) {
+        Log.v(TAG, "uploadImage");
+            final String fileName = pictureFile;
+            HttpURLConnection conn = null;
+            DataOutputStream dos = null;
+            String lineEnd = "\r\n";
+            String twoHyphens = "--";
+            String boundary = "*****";
+            int bytesRead, bytesAvailable, bufferSize;
+            byte[] buffer;
+            int maxBufferSize = 1 * 1024 * 1024;
+        int serverResponseCode = 0;
+                try {
+                    URL url = new URL(mServerUrl);
 
+                    // Open a HTTP  connection to  the URL
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setDoInput(true); // Allow Inputs
+                    conn.setDoOutput(true); // Allow Outputs
+                    conn.setUseCaches(false); // Don't use a Cached Copy
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Connection", "Keep-Alive");
+                    conn.setRequestProperty("ENCTYPE", "multipart/form-data");
+                    conn.setRequestProperty("Content-Type", "multipart/form-data;boundary=" + boundary);
+                    conn.setRequestProperty("uploaded_file", fileName);
+
+                    dos = new DataOutputStream(conn.getOutputStream());
+
+                    dos.writeBytes(twoHyphens + boundary + lineEnd);
+                    dos.writeBytes("Content-Disposition: form-data; name=\"uploaded_file\";filename=\""
+                            + fileName + "\"" + lineEnd);
+
+                            dos.writeBytes(lineEnd);
+
+                    dos.write(data, 0, data.length);
+
+                    // send multipart form data necesssary after file data...
+                    dos.writeBytes(lineEnd);
+                    dos.writeBytes("SUBMIT=true");
+                    dos.writeBytes(lineEnd);
+                    dos.writeBytes(twoHyphens + boundary + twoHyphens + lineEnd);
+
+                    // Responses from the server (code and message)
+                    serverResponseCode = conn.getResponseCode();
+                    String serverResponseMessage = conn.getResponseMessage();
+                    Log.v(TAG,"server response = "+serverResponseMessage);
+
+                    Log.i("uploadFile", "HTTP Response is : "
+                            + serverResponseMessage + ": " + serverResponseCode);
+                    // Get the server response
+
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line = null;
+                    while((line = reader.readLine()) != null)
+                    {
+                        sb.append(line + "\n");
+                    }
+
+                    String serverResponseText = sb.toString();
+                    Log.v(TAG,"serverResponseText = "+serverResponseText+".");
+                    if(serverResponseCode == 200){
+
+                        runOnUiThread(new Runnable() {
+                            public void run() {
+
+                                String msg = "File Upload Completed.\n\n See uploaded file here : \n\n"
+                                        +" http://www.androidexample.com/media/uploads/"
+                                        +fileName;
+
+                                //messageText.setText(msg);
+                                Toast.makeText(getApplicationContext(), "File Upload Complete.",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                    //close the streams //
+                    dos.flush();
+                    dos.close();
+                } catch (MalformedURLException ex) {
+                    ex.printStackTrace();
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            //messageText.setText("MalformedURLException Exception : check script url.");
+                            Toast.makeText(getApplicationContext(), "MalformedURLException",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    Log.e("Upload file to server", "error: " + ex.getMessage(), ex);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            //messageText.setText("Got Exception : see logcat ");
+                            Toast.makeText(getApplicationContext(), "Got Exception : see logcat ",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    Log.e("Upload file to server Exception", "Exception : "
+                            + e.getMessage(), e);
+                }
+                return serverResponseCode;
     }
 
     /**
@@ -202,6 +347,8 @@ public class SdServer extends Service {
         // To be safe, you should check that the SDCard is mounted
         // using Environment.getExternalStorageState() before doing this.
 
+        //File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
+        //        Environment.DIRECTORY_PICTURES), "bunnyCam");
         File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
                 Environment.DIRECTORY_PICTURES), "bunnyCam");
         // This location works best if you want the created images to be shared
@@ -327,7 +474,7 @@ public class SdServer extends Service {
         Log.v(TAG, "updatePrefs() mImageCapturePeriod = " + mImageCapturePeriod);
 
         mUploadImages = SP.getBoolean("uploadImages", false);
-        mServerUrl = SP.getString("serverUrl", "bunnycam.webhop.info/upload.php");
+        mServerUrl = SP.getString("serverUrl", "http://bunnycam.webhop.info/upload.php");
     }
 
     /**
