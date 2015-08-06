@@ -7,6 +7,35 @@
         android:numeric="integer"
         android:defaultValue="10" />
     <CheckBoxPreference
+        android:key="useIpCamera"
+        android:title="use Ip Camera"
+        android:summary="Capture Images from IP Camera rather than phone camera" />
+    <EditTextPreference
+        android:key="ipCameraUrl"
+        android:title="URL of IP Camera"
+        android:summary="URL of IP Camera"
+        android:defaultValue="http://192.168.1.27/getsnapshot.cgi" />
+    <EditTextPreference
+        android:key="ipCameraUname"
+        android:title="User name for IP Camera"
+        android:summary="User name of IP Camera"
+        android:defaultValue="guest" />
+    <EditTextPreference
+        android:key="ipCameraPasswd"
+        android:title="Password for IP Camera"
+        android:summary="Password of IP Camera"
+        android:defaultValue="guest" />
+    <CheckBoxPreference
+        android:key="respondToSms"
+        android:title="Respond to SMS Messages"
+        android:summary="Respond to SMS messages that contain the correct password." />
+    <EditTextPreference
+        android:key="smsPasswd"
+        android:title="Password to be contained in SMS message for us to respond to it."
+        android:summary="SMS Password"
+        android:defaultValue="BunnyCam" />
+
+    <CheckBoxPreference
         android:key="uploadImages"
         android:title="Upload Images to a server"
         android:summary="Upload each image when it is captured"

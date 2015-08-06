@@ -16,11 +16,14 @@ import android.os.IBinder;
 import android.os.Message;
 import android.os.Messenger;
 import android.preference.PreferenceManager;
+import android.provider.MediaStore;
 import android.support.v7.app.ActionBarActivity;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.ViewConfiguration;
+import android.widget.Button;
 
 import java.lang.reflect.Field;
 
@@ -60,6 +63,17 @@ public class MainActivity extends ActionBarActivity
             Log.v(TAG,"menubar fiddle exception: "+e.toString());
         }
 
+
+        Button viewImagesButton = (Button) findViewById(R.id.viewImagesButton);
+        viewImagesButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent();
+                intent.setAction(Intent.ACTION_VIEW);
+                intent.setData(MediaStore.Images.Media.INTERNAL_CONTENT_URI);
+                startActivity(intent);
+            }
+        });
 
         // start timer to refresh user interface every second.
         /*Timer uiTimer = new Timer();

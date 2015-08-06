@@ -38,6 +38,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
 import android.hardware.Camera;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Environment;
 import android.os.Handler;
@@ -93,7 +94,7 @@ public class SdServer extends Service {
     private HandlerThread thread;
     private PowerManager.WakeLock mWakeLock = null;
     private Camera mCamera;
-    private Timer mPictureTimer;
+    private Timer mPictureTimer = null;
     private boolean mCameraReady = false;
     private int mImageCapturePeriod;
     private boolean mUploadImages;
@@ -101,6 +102,10 @@ public class SdServer extends Service {
     private WebServer mWebServer = null;
     private String mLatestImageFname = null;
     private byte[] mLatestImage = null;
+    private boolean mUseIpCamera = false;
+    private String mIpCameraUrl = "";
+    private String mIpCameraUname = "";
+    private String mIpCameraPasswd = "";
 
     private Handler handler;
 
@@ -176,6 +181,7 @@ public class SdServer extends Service {
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         mWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
                 "MyWakelockTag");
+
     }
 
     /*
@@ -193,8 +199,13 @@ public class SdServer extends Service {
             if (mCameraReady) {
                 mCamera.startPreview();
                 mCameraReady = false;
-                Log.v(TAG, "Taking Picture");
-                mCamera.takePicture(null, null, pictureCallBack);
+                try {
+                    Log.v(TAG, "Taking Picture");
+                    mCamera.takePicture(null, null, pictureCallBack);
+                } catch (Exception e) {
+                    Log.v(TAG, "Error Taking Picture");
+                    e.printStackTrace();
+                }
             } else {
                 Log.v(TAG, "Camera Not Ready - waiting.");
             }
@@ -222,15 +233,23 @@ public class SdServer extends Service {
                     Log.d(TAG, "Error accessing file: " + e.getMessage());
                 }
                 mLatestImageFname = pictureFile.getName();
+
+                mLatestImage = data;
+
+                // Update the media library so the new image appears in gallery.
+                Intent intent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
+                intent.setData(Uri.fromFile(pictureFile));
+                sendBroadcast(intent);
+
+                if (mUploadImages) {
+                    if (pictureFile != null)
+                        uploadImage(pictureFile.getName(), data);
+                    else
+                        uploadImage("unknown", data);
+                }
             }
-            mLatestImage = data;
             mCameraReady = true;
-            if (mUploadImages) {
-                if (pictureFile!=null)
-                    uploadImage(pictureFile.getName(), data);
-                else
-                    uploadImage("unknown", data);
-            }
+
         }
     };
 
@@ -407,14 +426,6 @@ public class SdServer extends Service {
         Log.v(TAG, "showing Notification");
         showNotification();
 
-        // start timer to take pictures at regular intervals.
-        mPictureTimer = new Timer();
-        mPictureTimer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                takePicture();
-            }
-        }, 0, mImageCapturePeriod);
 
         // Start the web server
         startWebServer();
@@ -433,6 +444,22 @@ public class SdServer extends Service {
     @Override
     public void onDestroy() {
         Log.v(TAG, "onDestroy(): SdServer Service stopping");
+        // Stop camera timer
+        mPictureTimer.cancel();
+
+        try {
+            if (mCamera != null) {
+                mCamera.release();
+                mCamera = null;
+            }
+            Log.v(TAG, "onDestroy() - released camera.");
+        } catch (Exception e) {
+            Log.v(TAG, "onDestroy() - Error releasing camera..");
+            e.printStackTrace();
+
+        }
+
+
         // Cancel the notification.
         Log.v(TAG, "onDestroy(): cancelling notification");
         mNM.cancel(NOTIFICATION_ID);
@@ -463,18 +490,38 @@ public class SdServer extends Service {
 
     /**
      * updatePrefs() - update basic settings from the SharedPreferences
+     * Modifies timers to reflect settings in case they have changed.
      * - defined in res/xml/prefs.xml
      */
     public void updatePrefs() {
         Log.v(TAG, "updatePrefs()");
         SharedPreferences SP = PreferenceManager
                 .getDefaultSharedPreferences(getBaseContext());
-        String prefStr = SP.getString("ImageCapturePeriod", "60");
+        String prefStr = SP.getString("imageCapturePeriod", "60");
         mImageCapturePeriod = (short) Integer.parseInt(prefStr) * 1000;
         Log.v(TAG, "updatePrefs() mImageCapturePeriod = " + mImageCapturePeriod);
 
         mUploadImages = SP.getBoolean("uploadImages", false);
         mServerUrl = SP.getString("serverUrl", "http://bunnycam.webhop.info/upload.php");
+
+        mUseIpCamera = SP.getBoolean("useIpCamera", false);
+        mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/getsnap.cgi");
+        mIpCameraUname = SP.getString("ipCameraUname", "guest");
+        mIpCameraPasswd = SP.getString("ipCameraPasswd", "guest");
+
+        // start timer to take pictures at regular intervals.
+        if (mPictureTimer != null) {
+            mPictureTimer.cancel();
+            mPictureTimer = null;
+        }
+        mPictureTimer = new Timer();
+        mPictureTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                takePicture();
+            }
+        }, 0, mImageCapturePeriod);
+
     }
 
     /**
