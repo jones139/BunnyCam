@@ -37,6 +37,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
 import android.hardware.Camera;
 import android.net.Uri;
 import android.os.Binder;
@@ -56,6 +57,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -76,13 +78,14 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 import fi.iki.elonen.NanoHTTPD;
+
 /**
  * Based on example at:
  * http://stackoverflow.com/questions/14309256/using-nanohttpd-in-android
  * and
  * http://developer.android.com/guide/components/services.html#ExtendingService
  */
-public class SdServer extends Service {
+public class SdServer extends Service implements IpCamListener {
     private static final int CAMERA_ID = 0;  // Use the device's primary camera.
     public static final int MEDIA_TYPE_IMAGE = 1;
     public static final int MEDIA_TYPE_VIDEO = 2;
@@ -106,6 +109,7 @@ public class SdServer extends Service {
     private String mIpCameraUrl = "";
     private String mIpCameraUname = "";
     private String mIpCameraPasswd = "";
+    private IpCamController mIpCamController = null;
 
     private Handler handler;
 
@@ -175,6 +179,7 @@ public class SdServer extends Service {
             mCameraReady = false;
             e.printStackTrace();
         }
+
         //takePicture();
 
         // Create a wake lock, but don't use it until the service is started.
@@ -194,23 +199,31 @@ public class SdServer extends Service {
 
     private void takePicture() {
         Log.v(TAG, "takePicture()");
-        if (mCamera != null) {
-            // Only try to take a picture if we have finished taking the previous one.
-            if (mCameraReady) {
-                mCamera.startPreview();
-                mCameraReady = false;
-                try {
-                    Log.v(TAG, "Taking Picture");
-                    mCamera.takePicture(null, null, pictureCallBack);
-                } catch (Exception e) {
-                    Log.v(TAG, "Error Taking Picture");
-                    e.printStackTrace();
+        if (mUseIpCamera) {
+            Log.v(TAG, "takePicture() = Using IP Camera");
+            mIpCamController = new IpCamController(mIpCameraUrl, mIpCameraUname, mIpCameraPasswd, 0, this);
+            byte[] data = mIpCamController.getImage();
+            Log.v(TAG, "takePicture - calling picturteCallBack()");
+            saveImage(data);
+        } else {
+            if (mCamera != null) {
+                // Only try to take a picture if we have finished taking the previous one.
+                if (mCameraReady) {
+                    mCamera.startPreview();
+                    mCameraReady = false;
+                    try {
+                        Log.v(TAG, "Taking Picture");
+                        mCamera.takePicture(null, null, pictureCallBack);
+                    } catch (Exception e) {
+                        Log.v(TAG, "Error Taking Picture");
+                        e.printStackTrace();
+                    }
+                } else {
+                    Log.v(TAG, "Camera Not Ready - waiting.");
                 }
             } else {
-                Log.v(TAG, "Camera Not Ready - waiting.");
+                Log.v(TAG, "mCamera is Null!!!");
             }
-        } else {
-            Log.v(TAG, "mCamera is Null!!!");
         }
     }
 
@@ -218,40 +231,66 @@ public class SdServer extends Service {
     private Camera.PictureCallback pictureCallBack = new Camera.PictureCallback() {
         public void onPictureTaken(byte[] data, Camera camera) {
             Log.v(TAG, "onPictureTaken()");
-            File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
-            if (pictureFile == null) {
-                Log.d(TAG, "Error creating media file, check storage permissions: ");
-            } else {
-
-                try {
-                    FileOutputStream fos = new FileOutputStream(pictureFile);
-                    fos.write(data);
-                    fos.close();
-                } catch (FileNotFoundException e) {
-                    Log.d(TAG, "File not found: " + e.getMessage());
-                } catch (IOException e) {
-                    Log.d(TAG, "Error accessing file: " + e.getMessage());
-                }
-                mLatestImageFname = pictureFile.getName();
-
-                mLatestImage = data;
-
-                // Update the media library so the new image appears in gallery.
-                Intent intent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
-                intent.setData(Uri.fromFile(pictureFile));
-                sendBroadcast(intent);
-
-                if (mUploadImages) {
-                    if (pictureFile != null)
-                        uploadImage(pictureFile.getName(), data);
-                    else
-                        uploadImage("unknown", data);
-                }
-            }
             mCameraReady = true;
-
+            saveImage(data);
         }
     };
+
+    /**
+     * Save the byte array data as an image.
+     *
+     * @param data
+     * @return
+     */
+    private int saveImage(byte[] data) {
+        Log.v(TAG, "saveImage()");
+        File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
+        if (pictureFile == null) {
+            Log.d(TAG, "Error creating media file, check storage permissions: ");
+            return -1;
+        } else {
+
+            try {
+                FileOutputStream fos = new FileOutputStream(pictureFile);
+                fos.write(data);
+                fos.close();
+            } catch (FileNotFoundException e) {
+                Log.d(TAG, "File not found: " + e.getMessage());
+                return -1;
+            } catch (IOException e) {
+                Log.d(TAG, "Error accessing file: " + e.getMessage());
+                return -1;
+            }
+            mLatestImageFname = pictureFile.getName();
+            mLatestImage = data;
+
+            // Update the media library so the new image appears in gallery.
+            Intent intent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
+            intent.setData(Uri.fromFile(pictureFile));
+            sendBroadcast(intent);
+
+            if (mUploadImages) {
+                Log.v(TAG, "Uploading Image to Server...");
+                if (pictureFile != null)
+                    uploadImage(pictureFile.getName(), data);
+                else
+                    uploadImage("unknown", data);
+            }
+        }
+        Log.v(TAG, "saveImage complete");
+        return 0;
+
+    }
+
+    /**
+     * onGotImage - called by IpCamController when an image from the IP Camera is received.
+     *
+     * @param img
+     */
+    public void onGotImage(byte[] img) {
+        Log.v(TAG, "onGotImage");
+    }
+
 
     /* uploadImage - based on http://androidexample.com/Upload_File_To_Server_-_Android_Example/index.php?view=article_discription&aid=83&aaid=106
      */

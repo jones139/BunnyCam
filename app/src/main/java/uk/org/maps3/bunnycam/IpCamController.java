@@ -1,4 +1,4 @@
-package uk.org.maps3.ipcamcontroller;
+package uk.org.maps3.bunnycam;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -11,9 +11,16 @@ import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 
+interface IpCamListener {
+    public void onGotImage(byte[] img);
+}
+
 /**
+ * IpCamController will grab an image of an IP Camera on demand, carrying out the activity in the background to avoid locking
+ * up the user interface.
  * Created by graham on 04/08/15.
  */
 public class IpCamController {
@@ -22,38 +29,57 @@ public class IpCamController {
     private String mPasswd;   // camera password
     private int mCmdSet;   // Command set for ip camera 0 = mJPEG, 1=h264.
     private String TAG = "IpCamController";
+    private IpCamListener mIpCamListener = null;   // the class containing the onGotImage() callback function.
+    private byte[] mResult;
+    private ImageDownloader mImageDownloader;
 
     /**
      * Create an instance of IpCamController with specified ip adress, username, password and command set.
+     * Command set will be used to select different brands of IP camera, which use different commands to  obtain images,
+     * but this is not implemented at present.
+     * @TODO Implement cmdSet to use different iP Cameras.
      *
      * @param ipAddr
      * @param uname
      * @param passwd
      * @param cmdSet
      */
-    public IpCamController(String ipAddr, String uname, String passwd, int cmdSet) {
+    public IpCamController(String ipAddr, String uname, String passwd, int cmdSet, IpCamListener listener) {
         mIpAddr = ipAddr;
         mUname = uname;
         mPasswd = passwd;
         mCmdSet = cmdSet;
+        mIpCamListener = listener;
+        mResult = null;
     }
 
     /**
-     * grab a still image from the camera
+     * grab a still image from the camera.  Returns a JPEG image as a byte array.
      *
      * @return the image data as a byte array.
      */
     public byte[] getImage() {
-        return null;
+        Log.v(TAG, "getImage() - mIpAddr = " + mIpAddr);
+        ImageDownloader imageDownloader = new ImageDownloader();
+        Bitmap bitmap = imageDownloader.doInBackground(new String[]{mIpAddr + "?user=" + mUname + "&pwd=" + mPasswd});
+        Log.v(TAG, "getImage() - returned from doInBackground()");
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
+        byte[] data = os.toByteArray();
+        return data;
     }
 
     /**
      * imageDownloader - based on http://javatechig.com/android/download-image-using-asynctask-in-android
      */
-    private class imageDownloader extends AsyncTask {
+    private class ImageDownloader extends AsyncTask<String, Void, Bitmap> {
         @Override
-        protected Object doInBackground(Object[] params) {
-            return downloadBitmap((String) params[0]);
+        protected Bitmap doInBackground(String... params) {
+            Log.v(TAG, "doInBackground - calling downloadImage(" + params[0] + ")");
+            //try {Thread.sleep(10000);} catch(Exception e) {Log.v(TAG,"Exception during sleep - "+e.toString());}
+            Bitmap bitmap = (Bitmap) downloadImage((String) params[0]);
+            Log.v(TAG, "doInBackground - returned from downloadImage()");
+            return bitmap;
         }
 
         @Override
@@ -62,14 +88,16 @@ public class IpCamController {
         }
 
         @Override
-        protected void onPostExecute(Object o) {
-            super.onPostExecute(o);
-            Bitmap result = (Bitmap) o;
+        protected void onPostExecute(Bitmap result) {
             Log.v(TAG, "onPostExecute()");
+            super.onPostExecute(result);
+            //byte[] result = (byte[]) o;
+            //mIpCamListener.onGotImage(result);
         }
 
 
-        private Bitmap downloadBitmap(String url) {
+        private Bitmap downloadImage(String url) {
+            byte[] result = null;
             final DefaultHttpClient client = new DefaultHttpClient();
             final HttpGet getRequest = new HttpGet(url);
             try {
@@ -85,11 +113,17 @@ public class IpCamController {
                 if (entity != null) {
                     InputStream inputStream = null;
                     try {
+                        Log.v(TAG, "entity=" + entity.toString());
                         // getting contents from the stream
                         inputStream = entity.getContent();
+                        Log.v(TAG, "inputStrem=" + inputStream.toString());
                         // decoding stream data back into image Bitmap that android understands
                         final Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                        Log.v(TAG, "downloadImage() - Returning Bitmap");
                         return bitmap;
+
+                        //inputStream.read(result);
+                        //return result;
                     } finally {
                         if (inputStream != null) {
                             inputStream.close();
@@ -101,7 +135,7 @@ public class IpCamController {
                 // You Could provide a more explicit error message for IOException
                 getRequest.abort();
                 Log.e(TAG, "Something went wrong while" +
-                        " retrieving bitmap from " + url + e.toString());
+                        " retrieving bitmap from " + url + ": Error is: " + e.toString());
             }
             return null;
         }
