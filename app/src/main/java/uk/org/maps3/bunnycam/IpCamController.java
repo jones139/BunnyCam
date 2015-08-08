@@ -38,6 +38,7 @@ public class IpCamController {
      * Command set will be used to select different brands of IP camera, which use different commands to  obtain images,
      * but this is not implemented at present.
      * @TODO Implement cmdSet to use different iP Cameras.
+     * @TODO Extend class to do more with the IP camera - move a pan/tilt camera etc.
      *
      * @param ipAddr
      * @param uname
@@ -58,15 +59,10 @@ public class IpCamController {
      *
      * @return the image data as a byte array.
      */
-    public byte[] getImage() {
+    public void getImage() {
         Log.v(TAG, "getImage() - mIpAddr = " + mIpAddr);
         ImageDownloader imageDownloader = new ImageDownloader();
-        Bitmap bitmap = imageDownloader.doInBackground(new String[]{mIpAddr + "?user=" + mUname + "&pwd=" + mPasswd});
-        Log.v(TAG, "getImage() - returned from doInBackground()");
-        ByteArrayOutputStream os = new ByteArrayOutputStream();
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
-        byte[] data = os.toByteArray();
-        return data;
+        imageDownloader.execute(new String[]{mIpAddr + "?user=" + mUname + "&pwd=" + mPasswd});
     }
 
     /**
@@ -88,11 +84,15 @@ public class IpCamController {
         }
 
         @Override
-        protected void onPostExecute(Bitmap result) {
+        protected void onPostExecute(Bitmap bitmap) {
             Log.v(TAG, "onPostExecute()");
-            super.onPostExecute(result);
-            //byte[] result = (byte[]) o;
-            //mIpCamListener.onGotImage(result);
+            super.onPostExecute(bitmap);
+
+            Log.v(TAG, "getImage() - returned from doInBackground()");
+            ByteArrayOutputStream os = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
+            byte[] data = os.toByteArray();
+            mIpCamListener.onGotImage(data);
         }
 
 
