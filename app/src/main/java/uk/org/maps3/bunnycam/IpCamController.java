@@ -38,6 +38,7 @@ public class IpCamController {
      * Command set will be used to select different brands of IP camera, which use different commands to  obtain images,
      * but this is not implemented at present.
      * @TODO Implement cmdSet to use different iP Cameras.
+     * @TODO Extend class to do more with the IP camera - move a pan/tilt camera etc.
      *
      * @param ipAddr
      * @param uname

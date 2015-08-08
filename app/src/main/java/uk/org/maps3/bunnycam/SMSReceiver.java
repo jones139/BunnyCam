@@ -63,10 +63,13 @@ public class SMSReceiver extends BroadcastReceiver {
                 Log.d(TAG, "onReceive() - msg = " + str);
             }
             String msg0 = msgs[0].getMessageBody().toString();
-            // Check if it is a location request.
+            // Check that the SMS message contains our password.
             if (mActive && msg0.toUpperCase().contains(mPassword.toUpperCase())) {
-                // Get the location using the LocationFinder.
                 smsNumber = msgs[0].getOriginatingAddress();
+                //Intent intent = new Intent(this,SdServer.class);
+                Intent intent = new Intent(contextArg.getApplicationContext(), SdServer.class);
+                intent.setData(Uri.parse("Upload"));
+                contextArg.getApplicationContext().startService(intent);
             } else {
                 Log.d(TAG, "onReceive() - inactive, or Message does "
                         + "not contain Password - Ignoring");

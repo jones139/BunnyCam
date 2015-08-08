@@ -294,108 +294,12 @@ public class SdServer extends Service implements IpCamListener {
 
     /* uploadImage - based on http://androidexample.com/Upload_File_To_Server_-_Android_Example/index.php?view=article_discription&aid=83&aaid=106
      */
-    private int uploadImage(String pictureFile, byte[] data) {
+    private boolean uploadImage(String pictureFile, byte[] data) {
         Log.v(TAG, "uploadImage");
-            final String fileName = pictureFile;
-            HttpURLConnection conn = null;
-            DataOutputStream dos = null;
-            String lineEnd = "\r\n";
-            String twoHyphens = "--";
-            String boundary = "*****";
-            int bytesRead, bytesAvailable, bufferSize;
-            byte[] buffer;
-            int maxBufferSize = 1 * 1024 * 1024;
-        int serverResponseCode = 0;
-                try {
-                    URL url = new URL(mServerUrl);
-
-                    // Open a HTTP  connection to  the URL
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setDoInput(true); // Allow Inputs
-                    conn.setDoOutput(true); // Allow Outputs
-                    conn.setUseCaches(false); // Don't use a Cached Copy
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Connection", "Keep-Alive");
-                    conn.setRequestProperty("ENCTYPE", "multipart/form-data");
-                    conn.setRequestProperty("Content-Type", "multipart/form-data;boundary=" + boundary);
-                    conn.setRequestProperty("uploaded_file", fileName);
-
-                    dos = new DataOutputStream(conn.getOutputStream());
-
-                    dos.writeBytes(twoHyphens + boundary + lineEnd);
-                    dos.writeBytes("Content-Disposition: form-data; name=\"uploaded_file\";filename=\""
-                            + fileName + "\"" + lineEnd);
-
-                            dos.writeBytes(lineEnd);
-
-                    dos.write(data, 0, data.length);
-
-                    // send multipart form data necesssary after file data...
-                    dos.writeBytes(lineEnd);
-                    dos.writeBytes("SUBMIT=true");
-                    dos.writeBytes(lineEnd);
-                    dos.writeBytes(twoHyphens + boundary + twoHyphens + lineEnd);
-
-                    // Responses from the server (code and message)
-                    serverResponseCode = conn.getResponseCode();
-                    String serverResponseMessage = conn.getResponseMessage();
-                    Log.v(TAG,"server response = "+serverResponseMessage);
-
-                    Log.i("uploadFile", "HTTP Response is : "
-                            + serverResponseMessage + ": " + serverResponseCode);
-                    // Get the server response
-
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder sb = new StringBuilder();
-                    String line = null;
-                    while((line = reader.readLine()) != null)
-                    {
-                        sb.append(line + "\n");
-                    }
-
-                    String serverResponseText = sb.toString();
-                    Log.v(TAG,"serverResponseText = "+serverResponseText+".");
-                    if(serverResponseCode == 200){
-
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-
-                                String msg = "File Upload Completed.\n\n See uploaded file here : \n\n"
-                                        +" http://www.androidexample.com/media/uploads/"
-                                        +fileName;
-
-                                //messageText.setText(msg);
-                                Toast.makeText(getApplicationContext(), "File Upload Complete.",
-                                        Toast.LENGTH_SHORT).show();
-                            }
-                        });
-                    }
-                    //close the streams //
-                    dos.flush();
-                    dos.close();
-                } catch (MalformedURLException ex) {
-                    ex.printStackTrace();
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            //messageText.setText("MalformedURLException Exception : check script url.");
-                            Toast.makeText(getApplicationContext(), "MalformedURLException",
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                    Log.e("Upload file to server", "error: " + ex.getMessage(), ex);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            //messageText.setText("Got Exception : see logcat ");
-                            Toast.makeText(getApplicationContext(), "Got Exception : see logcat ",
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                    Log.e("Upload file to server Exception", "Exception : "
-                            + e.getMessage(), e);
-                }
-                return serverResponseCode;
+        ImageUploader imageUploader = new ImageUploader();
+        Object[] params = {mLatestImageFname, mServerUrl, mLatestImage};
+        imageUploader.execute(params);
+        return true;
     }
 
     /**
@@ -454,7 +358,17 @@ public class SdServer extends Service implements IpCamListener {
      */
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.v(TAG, "onStartCommand() - intent Action = " + intent.getAction() + " intent data = " + intent.getDataString());
+        // SMSReceiver may send us an 'Upload' intent to ask us to upload the latest image.  If not, we assume that this intent
+        // is asking us to start the service.
+        if (intent.getDataString().equals("Upload")) {
+            Log.v(TAG, "onStartCommand() - Upload intent received");
+            uploadImage(mLatestImageFname, mLatestImage);
+            return 0;
+        }
+
         Log.v(TAG, "onStartCommand() - SdServer service starting");
+
 
         // Update preferences.
         Log.v(TAG, "onStartCommand() - calling updatePrefs()");
