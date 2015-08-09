@@ -27,7 +27,7 @@
         </activity>
         <activity android:name="PrefActivity"
             android:label="OpenSeizureDetector Preferences"
-            android:icon="@drawable/star_of_life_48x48"
+            android:icon="@drawable/bunny_white"
             >
         </activity>
         <service

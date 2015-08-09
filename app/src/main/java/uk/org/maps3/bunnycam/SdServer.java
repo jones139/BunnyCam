@@ -189,6 +189,85 @@ public class SdServer extends Service implements IpCamListener {
 
     }
 
+
+    /**
+     * onStartCommand - start the web server and the message loop for
+     * communications with other processes.
+     */
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.v(TAG, "onStartCommand() - intent Action = " + intent.getAction() + " intent data = " + intent.getDataString());
+        // SMSReceiver may send us an 'Upload' intent to ask us to upload the latest image.  If not, we assume that this intent
+        // is asking us to start the service.
+        if (intent.getDataString().equals("Upload")) {
+            Log.v(TAG, "onStartCommand() - Upload intent received");
+            uploadImage(mLatestImageFname, mLatestImage);
+            return 0;
+        }
+
+        Log.v(TAG, "onStartCommand() - SdServer service starting");
+
+
+        // Update preferences.
+        Log.v(TAG, "onStartCommand() - calling updatePrefs()");
+        updatePrefs();
+
+        // Display a notification icon in the status bar of the phone to
+        // show the service is running.
+        Log.v(TAG, "showing Notification");
+        showNotification();
+
+
+        // Start the web server
+        startWebServer();
+
+        // Apply the wake-lock to prevent CPU sleeping (very battery intensive!)
+        if (mWakeLock != null) {
+            mWakeLock.acquire();
+            Log.v(TAG, "Applied Wake Lock to prevent device sleeping");
+        } else {
+            Log.d(TAG, "mmm...mWakeLock is null, so not aquiring lock.  This shouldn't happen!");
+        }
+
+        return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        Log.v(TAG, "onDestroy(): SdServer Service stopping");
+        // Stop camera timer
+        mPictureTimer.cancel();
+
+        try {
+            if (mCamera != null) {
+                mCamera.release();
+                mCamera = null;
+            }
+            Log.v(TAG, "onDestroy() - released camera.");
+        } catch (Exception e) {
+            Log.v(TAG, "onDestroy() - Error releasing camera..");
+            e.printStackTrace();
+
+        }
+
+        // Remove the wake-lock to prevent CPU sleeping
+        if (mWakeLock != null) {
+            mWakeLock.release();
+            Log.v(TAG, "Removed Wake Lock to allow device sleeping");
+        } else {
+            Log.d(TAG, "mmm...mWakeLock is null, so not aquiring lock.  This shouldn't happen!");
+        }
+
+        // Cancel the notification.
+        Log.v(TAG, "onDestroy(): cancelling notification");
+        mNM.cancel(NOTIFICATION_ID);
+        // stop this service.
+        Log.v(TAG, "onDestroy(): calling stopSelf()");
+        stopSelf();
+    }
+
+
+
     /*
     Taken from http://stackoverflow.com/questions/18948251/not-able-to-call-runonuithread-in-a-thread-from-inside-of-a-service
      */
@@ -351,74 +430,7 @@ public class SdServer extends Service implements IpCamListener {
     }
 
 
-    /**
-     * onStartCommand - start the web server and the message loop for
-     * communications with other processes.
-     */
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.v(TAG, "onStartCommand() - intent Action = " + intent.getAction() + " intent data = " + intent.getDataString());
-        // SMSReceiver may send us an 'Upload' intent to ask us to upload the latest image.  If not, we assume that this intent
-        // is asking us to start the service.
-        if (intent.getDataString().equals("Upload")) {
-            Log.v(TAG, "onStartCommand() - Upload intent received");
-            uploadImage(mLatestImageFname, mLatestImage);
-            return 0;
-        }
 
-        Log.v(TAG, "onStartCommand() - SdServer service starting");
-
-
-        // Update preferences.
-        Log.v(TAG, "onStartCommand() - calling updatePrefs()");
-        updatePrefs();
-
-        // Display a notification icon in the status bar of the phone to
-        // show the service is running.
-        Log.v(TAG, "showing Notification");
-        showNotification();
-
-
-        // Start the web server
-        startWebServer();
-
-        // Apply the wake-lock to prevent CPU sleeping (very battery intensive!)
-        if (mWakeLock!=null) {
-            mWakeLock.acquire();
-            Log.v(TAG,"Applied Wake Lock to prevent device sleeping");
-        } else {
-            Log.d(TAG,"mmm...mWakeLock is null, so not aquiring lock.  This shouldn't happen!");
-        }
-
-        return START_STICKY;
-    }
-
-    @Override
-    public void onDestroy() {
-        Log.v(TAG, "onDestroy(): SdServer Service stopping");
-        // Stop camera timer
-        mPictureTimer.cancel();
-
-        try {
-            if (mCamera != null) {
-                mCamera.release();
-                mCamera = null;
-            }
-            Log.v(TAG, "onDestroy() - released camera.");
-        } catch (Exception e) {
-            Log.v(TAG, "onDestroy() - Error releasing camera..");
-            e.printStackTrace();
-
-        }
-
-
-        // Cancel the notification.
-        Log.v(TAG, "onDestroy(): cancelling notification");
-        mNM.cancel(NOTIFICATION_ID);
-        // stop this service.
-        Log.v(TAG, "onDestroy(): calling stopSelf()");
-        stopSelf();
-    }
 
 
     /**
