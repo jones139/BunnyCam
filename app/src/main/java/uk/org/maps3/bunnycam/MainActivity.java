@@ -9,6 +9,8 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -24,8 +26,12 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.Toast;
 
 import java.lang.reflect.Field;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class MainActivity extends ActionBarActivity
 {
@@ -35,6 +41,7 @@ public class MainActivity extends ActionBarActivity
     private Menu mOptionsMenu;
     private Intent sdServerIntent;
     private String versionName = "unknown";
+    private Timer mUiTimer;
 
     final Handler serverStatusHandler = new Handler();
     Messenger messenger = new Messenger(new ResponseHandler());
@@ -64,6 +71,17 @@ public class MainActivity extends ActionBarActivity
         }
 
 
+        Button getImageButton = (Button) findViewById(R.id.getImageButton);
+        getImageButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Log.v(TAG, "getImageButton.onClick()");
+                if (mSdServer != null) {
+                    mSdServer.takePicture();
+                }
+            }
+        });
+
         Button viewImagesButton = (Button) findViewById(R.id.viewImagesButton);
         viewImagesButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -75,13 +93,45 @@ public class MainActivity extends ActionBarActivity
             }
         });
 
-        // start timer to refresh user interface every second.
-        /*Timer uiTimer = new Timer();
-        uiTimer.schedule(new TimerTask() {
+        final Button findCameraButton = (Button) findViewById(R.id.findCameraButton);
+        findCameraButton.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void run() {updateUI();}
-        }, 0, 5000);
-*/
+            public void onClick(View v) {
+                Log.v(TAG, "findCameraButton.onClickListener()");
+                findCameraButton.setText("Searching for Camera....");
+                findCameraButton.setEnabled(false);
+                IpCamController ipcc = new IpCamController("null", "guest", "guest", 0, new IpCamListener() {
+                    @Override
+                    public void onGotImage(byte[] img, String msg) {
+                        Log.v(TAG, "onGotImage() - msg is : " + msg);
+                        makeToast("Camera found at Address " + msg);
+                        findCameraButton.setText("Find Camera");
+                        findCameraButton.setEnabled(true);
+                        SharedPreferences SP = PreferenceManager
+                                .getDefaultSharedPreferences(getBaseContext());
+                        SharedPreferences.Editor editor = SP.edit();
+                        //mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/snapshot.cgi");
+                        editor.putString("ipCameraUrl", "http://" + msg + "/snapshot.cgi");
+                        editor.apply();
+                        editor.commit();
+                        mSdServer.updatePrefs();
+                    }
+                });
+                ipcc.findCamera();
+            }
+        });
+
+        Button b;
+        b = (Button) findViewById(R.id.leftButton);
+        b.setOnClickListener(new CameraPanTiltOnClickListener());
+        b = (Button) findViewById(R.id.upButton);
+        b.setOnClickListener(new CameraPanTiltOnClickListener());
+        b = (Button) findViewById(R.id.downButton);
+        b.setOnClickListener(new CameraPanTiltOnClickListener());
+        b = (Button) findViewById(R.id.rightButton);
+        b.setOnClickListener(new CameraPanTiltOnClickListener());
+
+        mUiTimer = new Timer();
     }
 
     /**
@@ -135,6 +185,17 @@ public class MainActivity extends ActionBarActivity
         Log.v(TAG,"onStart()");
         SharedPreferences SP = PreferenceManager
                 .getDefaultSharedPreferences(getBaseContext());
+        int uiTimerPeriod = SP.getInt("uiTimerPeriod", 5000);
+        // start timer to refresh user interface every 5 seconds
+        mUiTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                updateUI();
+            }
+        }, 0, uiTimerPeriod);
+
+
+
         // From http://stackoverflow.com/questions/4471025/
         //         how-can-you-get-the-manifest-version-number-
         //         from-the-apps-layout-xml-variable
@@ -165,6 +226,7 @@ public class MainActivity extends ActionBarActivity
     protected void onStop() {
         super.onStop();
         unbindFromServer();
+        mUiTimer.purge();
     }
 
     /** Defines callbacks for service binding, passed to bindService() */
@@ -290,6 +352,7 @@ public class MainActivity extends ActionBarActivity
      * requests the ui to be updated by calling serverStatusRunnable.
      */
     private void updateUI() {
+        //Log.v(TAG,"updateUI");
         serverStatusHandler.post(uiRunnable);
     }
 
@@ -299,7 +362,14 @@ public class MainActivity extends ActionBarActivity
      */
     final Runnable uiRunnable = new Runnable() {
         public void run() {
-            Log.v(TAG,"uiRunnable()");
+            Log.v(TAG, "uiRunnable()");
+            if (mSdServer != null) {
+                if (mSdServer.mLatestImage != null) {
+                    ImageView imageView = (ImageView) findViewById(R.id.imageView);
+                    Bitmap bm = BitmapFactory.decodeByteArray(mSdServer.mLatestImage, 0, mSdServer.mLatestImage.length);
+                    imageView.setImageBitmap(bm);
+                }
+            }
         }
     };
 
@@ -308,9 +378,44 @@ public class MainActivity extends ActionBarActivity
     protected void onPause() {
         super.onPause();
     }
+
     @Override
     protected void onResume() {
         super.onResume();
+    }
+
+    private void makeToast(String msg) {
+        Log.d(TAG, "makeToast - msg=" + msg);
+        Toast toast = Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT);
+        toast.show();
+    }
+
+    class CameraPanTiltOnClickListener implements View.OnClickListener, IpCamListener {
+        @Override
+        public void onClick(View v) {
+            //Log.v(TAG,"CameraPanTitlOnClicListener.onClick()");
+            switch (v.getId()) {
+                case R.id.leftButton:
+                    Log.v(TAG, "LeftButton");
+                    break;
+                case R.id.upButton:
+                    Log.v(TAG, "UpButton");
+                    break;
+                case R.id.downButton:
+                    Log.v(TAG, "DownButton");
+                    break;
+                case R.id.rightButton:
+                    Log.v(TAG, "RightButton");
+                    break;
+                default:
+                    Log.w(TAG, "Unknown Button Clicked!!!!");
+            }
+        }
+
+        @Override
+        public void onGotImage(byte[] img, String msg) {
+            Log.v(TAG, "cameraPanTiltOnClickListener.onGotImage()");
+        }
     }
 
     class ResponseHandler extends Handler {
@@ -318,5 +423,6 @@ public class MainActivity extends ActionBarActivity
             Log.v(TAG,"Message="+message.toString());
         }
     }
+
 
 }

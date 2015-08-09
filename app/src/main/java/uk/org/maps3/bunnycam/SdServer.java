@@ -103,13 +103,14 @@ public class SdServer extends Service implements IpCamListener {
     private boolean mUploadImages;
     private String mServerUrl;
     private WebServer mWebServer = null;
-    private String mLatestImageFname = null;
-    private byte[] mLatestImage = null;
+    public String mLatestImageFname = null;
+    public byte[] mLatestImage = null;
     private boolean mUseIpCamera = false;
     private String mIpCameraUrl = "";
     private String mIpCameraUname = "";
     private String mIpCameraPasswd = "";
     private IpCamController mIpCamController = null;
+    private String mIpCamControllerMsg = "";
 
     private Handler handler;
 
@@ -277,7 +278,7 @@ public class SdServer extends Service implements IpCamListener {
     }
 
 
-    private void takePicture() {
+    public void takePicture() {
         Log.v(TAG, "takePicture()");
         if (mUseIpCamera) {
             Log.v(TAG, "takePicture() = Using IP Camera");
@@ -365,9 +366,14 @@ public class SdServer extends Service implements IpCamListener {
      *
      * @param img
      */
-    public void onGotImage(byte[] img) {
-        Log.v(TAG, "onGotImage");
-        saveImage(img);
+    public void onGotImage(byte[] img, String msg) {
+        Log.v(TAG, "onGotImage - msg=" + msg);
+        mIpCamControllerMsg = msg;
+        if (img != null) {
+            saveImage(img);
+        } else {
+            makeToast(msg);
+        }
     }
 
 
@@ -470,7 +476,7 @@ public class SdServer extends Service implements IpCamListener {
         mServerUrl = SP.getString("serverUrl", "http://bunnycam.webhop.info/upload.php");
 
         mUseIpCamera = SP.getBoolean("useIpCamera", false);
-        mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/getsnap.cgi");
+        mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/snapshot.cgi");
         mIpCameraUname = SP.getString("ipCameraUname", "guest");
         mIpCameraPasswd = SP.getString("ipCameraPasswd", "guest");
 
@@ -523,6 +529,12 @@ public class SdServer extends Service implements IpCamListener {
         }
     }
 
+
+    private void makeToast(String msg) {
+        Log.d(TAG, "makeToast - msg=" + msg);
+        Toast toast = Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT);
+        toast.show();
+    }
 
     /**
      * Class describing the seizure detector web server - appears on port
