@@ -88,11 +88,16 @@ public class IpCamController {
             Log.v(TAG, "onPostExecute()");
             super.onPostExecute(bitmap);
 
-            Log.v(TAG, "getImage() - returned from doInBackground()");
-            ByteArrayOutputStream os = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
-            byte[] data = os.toByteArray();
-            mIpCamListener.onGotImage(data);
+            Log.v(TAG, "onPostExecute() - converting bitmap to byte array...");
+            try {
+                ByteArrayOutputStream os = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
+                byte[] data = os.toByteArray();
+                mIpCamListener.onGotImage(data);
+            } catch (Exception e) {
+                Log.e(TAG, "Error in onPostExecute()");
+                e.printStackTrace();
+            }
         }
 
 

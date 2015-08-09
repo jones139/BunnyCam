@@ -196,7 +196,8 @@ public class SdServer extends Service implements IpCamListener {
      */
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.v(TAG, "onStartCommand() - intent Action = " + intent.getAction() + " intent data = " + intent.getDataString());
+        Log.v(TAG, "onStartCommand()");
+        //Log.v(TAG, "onStartCommand() - intent Action = " + intent.getAction() + " intent data = " + intent.getDataString());
         // SMSReceiver may send us an 'Upload' intent to ask us to upload the latest image.  If not, we assume that this intent
         // is asking us to start the service.
         if (intent.getDataString().equals("Upload")) {
