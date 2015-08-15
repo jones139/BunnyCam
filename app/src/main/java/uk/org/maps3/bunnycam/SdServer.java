@@ -191,6 +191,11 @@ public class SdServer extends Service implements IpCamListener {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.v(TAG, "onStartCommand()");
+
+        // Update preferences.
+        Log.v(TAG, "onStartCommand() - calling updatePrefs()");
+        updatePrefs();
+
         //Log.v(TAG, "onStartCommand() - intent Action = " + intent.getAction() + " intent data = " + intent.getDataString());
         // SMSReceiver may send us an 'Upload' intent to ask us to upload the latest image.  If not, we assume that this intent
         // is asking us to start the service.
@@ -219,9 +224,7 @@ public class SdServer extends Service implements IpCamListener {
         Log.v(TAG, "onStartCommand() - SdServer service starting");
 
 
-        // Update preferences.
-        Log.v(TAG, "onStartCommand() - calling updatePrefs()");
-        updatePrefs();
+
 
         // Display a notification icon in the status bar of the phone to
         // show the service is running.
@@ -395,7 +398,7 @@ public class SdServer extends Service implements IpCamListener {
     /* uploadImage - based on http://androidexample.com/Upload_File_To_Server_-_Android_Example/index.php?view=article_discription&aid=83&aaid=106
      */
     private boolean uploadImage(String pictureFile, byte[] data) {
-        Log.v(TAG, "uploadImage");
+        Log.v(TAG, "uploadImage() - mLatestImageFname =" + mLatestImageFname + " mServerUrl=" + mServerUrl + " mLatestImage=" + mLatestImage);
         ImageUploader imageUploader = new ImageUploader();
         Object[] params = {mLatestImageFname, mServerUrl, mLatestImage};
         imageUploader.execute(params);
