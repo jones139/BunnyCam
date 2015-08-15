@@ -66,9 +66,18 @@ public class SMSReceiver extends BroadcastReceiver {
             // Check that the SMS message contains our password.
             if (mActive && msg0.toUpperCase().contains(mPassword.toUpperCase())) {
                 smsNumber = msgs[0].getOriginatingAddress();
-                //Intent intent = new Intent(this,SdServer.class);
                 Intent intent = new Intent(contextArg.getApplicationContext(), SdServer.class);
-                intent.setData(Uri.parse("Upload"));
+
+                if (msg0.toUpperCase().contains("MOVEUP"))
+                    intent.setData(Uri.parse("moveUp"));
+                else if (msg0.toUpperCase().contains("MOVEDOWN"))
+                    intent.setData(Uri.parse("moveDown"));
+                else if (msg0.toUpperCase().contains("MOVELEFT"))
+                    intent.setData(Uri.parse("moveLeft"));
+                else if (msg0.toUpperCase().contains("MOVERIGHT"))
+                    intent.setData(Uri.parse("moveRight"));
+                else
+                    intent.setData(Uri.parse("Upload"));
                 contextArg.getApplicationContext().startService(intent);
             } else {
                 Log.d(TAG, "onReceive() - inactive, or Message does "

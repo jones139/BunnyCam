@@ -7,6 +7,13 @@
         android:showAsAction="never|withText"
         />
 
+    <item
+        android:id="@+id/action_find_camera"
+        android:title="Find Camera"
+        android:orderInCategory="10"
+        app:showAsAction="never" />
+
+
     <item android:id="@+id/action_settings" android:title="@string/action_settings"
         android:orderInCategory="100" app:showAsAction="never" />
 </menu>

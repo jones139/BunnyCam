@@ -37,7 +37,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
-import android.graphics.Bitmap;
 import android.hardware.Camera;
 import android.net.Uri;
 import android.os.Binder;
@@ -55,20 +54,13 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Iterator;
@@ -106,9 +98,10 @@ public class SdServer extends Service implements IpCamListener {
     public String mLatestImageFname = null;
     public byte[] mLatestImage = null;
     private boolean mUseIpCamera = false;
-    private String mIpCameraUrl = "";
-    private String mIpCameraUname = "";
-    private String mIpCameraPasswd = "";
+    public String mIpCameraIpAddress = "";
+    public int mIpCameraCmdSet = 0;
+    public String mIpCameraUname = "";
+    public String mIpCameraPasswd = "";
     private IpCamController mIpCamController = null;
     private String mIpCamControllerMsg = "";
 
@@ -205,6 +198,22 @@ public class SdServer extends Service implements IpCamListener {
             Log.v(TAG, "onStartCommand() - Upload intent received");
             uploadImage(mLatestImageFname, mLatestImage);
             return 0;
+        } else if (intent.getDataString().equals("moveLeft")) {
+            Log.v(TAG, "onStartCommand() - moveLeft intent received");
+            moveCamera(0);
+            return 0;
+        } else if (intent.getDataString().equals("moveUp")) {
+            Log.v(TAG, "onStartCommand() - moveUp intent received");
+            moveCamera(1);
+            return 0;
+        } else if (intent.getDataString().equals("moveDown")) {
+            Log.v(TAG, "onStartCommand() - moveDown intent received");
+            moveCamera(2);
+            return 0;
+        } else if (intent.getDataString().equals("moveRight")) {
+            Log.v(TAG, "onStartCommand() - moveRight intent received");
+            moveCamera(3);
+            return 0;
         }
 
         Log.v(TAG, "onStartCommand() - SdServer service starting");
@@ -282,7 +291,7 @@ public class SdServer extends Service implements IpCamListener {
         Log.v(TAG, "takePicture()");
         if (mUseIpCamera) {
             Log.v(TAG, "takePicture() = Using IP Camera");
-            mIpCamController = new IpCamController(mIpCameraUrl, mIpCameraUname, mIpCameraPasswd, 0, this);
+            mIpCamController = new IpCamController(getApplicationContext(), mIpCameraIpAddress, mIpCameraUname, mIpCameraPasswd, mIpCameraCmdSet, this);
             mIpCamController.getImage();
         } else {
             if (mCamera != null) {
@@ -304,6 +313,12 @@ public class SdServer extends Service implements IpCamListener {
                 Log.v(TAG, "mCamera is Null!!!");
             }
         }
+    }
+
+
+    public void moveCamera(int direction) {
+        mIpCamController = new IpCamController(getApplicationContext(), mIpCameraIpAddress, mIpCameraUname, mIpCameraPasswd, mIpCameraCmdSet, this);
+        mIpCamController.moveCamera(direction);
     }
 
 
@@ -372,7 +387,7 @@ public class SdServer extends Service implements IpCamListener {
         if (img != null) {
             saveImage(img);
         } else {
-            makeToast(msg);
+            if (!msg.equals("")) makeToast(msg);
         }
     }
 
@@ -476,9 +491,11 @@ public class SdServer extends Service implements IpCamListener {
         mServerUrl = SP.getString("serverUrl", "http://bunnycam.webhop.info/upload.php");
 
         mUseIpCamera = SP.getBoolean("useIpCamera", false);
-        mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/snapshot.cgi");
+        mIpCameraIpAddress = SP.getString("ipCameraIpAddress", "192.168.1.27");
         mIpCameraUname = SP.getString("ipCameraUname", "guest");
         mIpCameraPasswd = SP.getString("ipCameraPasswd", "guest");
+        prefStr = SP.getString("commandSet", "0");
+        mIpCameraCmdSet = Integer.parseInt(prefStr);
 
         // start timer to take pictures at regular intervals.
         if (mPictureTimer != null) {

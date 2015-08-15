@@ -17,7 +17,7 @@
             style="?android:attr/buttonStyleSmall"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Get Image"
+            android:text="Save Image"
             android:id="@+id/getImageButton" />
 
         <Button
@@ -27,12 +27,7 @@
             android:id="@+id/viewImagesButton"
             style="?android:attr/buttonStyleSmall" />
 
-        <Button
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Find Camera"
-            android:id="@+id/findCameraButton" />
+
     </LinearLayout>
 
 

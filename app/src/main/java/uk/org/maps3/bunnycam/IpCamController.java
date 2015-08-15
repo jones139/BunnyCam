@@ -1,8 +1,11 @@
 package uk.org.maps3.bunnycam;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.AsyncTask;
+import android.preference.PreferenceManager;
 import android.util.Log;
 
 import org.apache.http.HttpEntity;
@@ -14,12 +17,17 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.params.BasicHttpParams;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.params.HttpParams;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.Enumeration;
+
 
 /**
  * the onGotImage(img,msg) function is called when an image is retrieved from the ip camera.  img is the byte array containing the
@@ -35,6 +43,7 @@ interface IpCamListener {
  * Created by graham on 04/08/15.
  */
 public class IpCamController {
+    private Context mContext;
     private String mIpAddr;  // ip address of camera
     private String mUname;   // camera user name
     private String mPasswd;   // camera password
@@ -44,20 +53,23 @@ public class IpCamController {
     private byte[] mResult;
     private String mMsg;
     private ImageDownloader mImageDownloader;
+    private JSONObject mUrlData = null;
+    private boolean mReady = false;  // Has the last request completed, so we are ready for another?  Avoids building up a queue...
 
     /**
      * Create an instance of IpCamController with specified ip adress, username, password and command set.
      * Command set will be used to select different brands of IP camera, which use different commands to  obtain images,
      * but this is not implemented at present.
-     * @TODO Implement cmdSet to use different iP Cameras.
-     * @TODO Extend class to do more with the IP camera - move a pan/tilt camera etc.
      *
      * @param ipAddr
      * @param uname
      * @param passwd
      * @param cmdSet
+     * @TODO Implement cmdSet to use different iP Cameras.
+     * @TODO Extend class to do more with the IP camera - move a pan/tilt camera etc.
      */
-    public IpCamController(String ipAddr, String uname, String passwd, int cmdSet, IpCamListener listener) {
+    public IpCamController(Context context, String ipAddr, String uname, String passwd, int cmdSet, IpCamListener listener) {
+        mContext = context;
         mIpAddr = ipAddr;
         mUname = uname;
         mPasswd = passwd;
@@ -65,7 +77,15 @@ public class IpCamController {
         mIpCamListener = listener;
         mResult = null;
         mMsg = "";
+        mUrlData = getUrlData();
+        if (mUrlData == null) {
+            Log.e(TAG, "IpCamController - error reading urldata");
+            mReady = false;
+        } else {
+            mReady = true;
+        }
     }
+
 
     /**
      * grab a still image from the camera.  Returns a JPEG image as a byte array.
@@ -73,10 +93,17 @@ public class IpCamController {
      * @return the image data as a byte array.
      */
     public void getImage() {
-        Log.v(TAG, "getImage() - mIpAddr = " + mIpAddr);
+        //Log.v(TAG, "getImage() - mIpAddr = " + mIpAddr);
         mMsg = "";
-        ImageDownloader imageDownloader = new ImageDownloader();
-        imageDownloader.execute(new String[]{mIpAddr + "?user=" + mUname + "&pwd=" + mPasswd});
+        if (mReady) {
+            ImageDownloader imageDownloader = new ImageDownloader();
+            String url = getImgUrl(mIpAddr, mUname, mPasswd, mCmdSet);
+            Log.v(TAG, "getImage = url=" + url);
+            mReady = false;
+            imageDownloader.execute(url);
+        } else {
+            Log.d(TAG, "getImage() - not ready - ignoring request");
+        }
     }
 
     /**
@@ -85,8 +112,17 @@ public class IpCamController {
      * @param dir
      */
     public void moveCamera(int dir) {
-
+        Log.v(TAG, "moveCamera() - dir = " + dir);
+        mMsg = "";
+        if (mReady) {
+            CameraMover cameraMover = new CameraMover();
+            cameraMover.execute(mIpAddr, dir);
+            mReady = false;
+        } else {
+            Log.d(TAG, "moveCamera() - not ready - ignoring request");
+        }
     }
+
 
     /**
      * Scan the local network for a device that responds to our camera URL, and return the IP address of the responding device.
@@ -100,202 +136,138 @@ public class IpCamController {
 
     }
 
-    /**
-     * imageDownloader - based on http://javatechig.com/android/download-image-using-asynctask-in-android
-     */
-    private class ImageDownloader extends AsyncTask<String, Void, Bitmap> {
-        @Override
-        protected Bitmap doInBackground(String... params) {
-            Log.v(TAG, "doInBackground - calling downloadImage(" + params[0] + ")");
-            //try {Thread.sleep(10000);} catch(Exception e) {Log.v(TAG,"Exception during sleep - "+e.toString());}
-            Bitmap bitmap = (Bitmap) downloadImage((String) params[0]);
-            Log.v(TAG, "doInBackground - returned from downloadImage()");
-            return bitmap;
-        }
-
-        @Override
-        protected void onPreExecute() {
-            Log.v(TAG, "onPreExecute()");
-        }
-
-        @Override
-        protected void onPostExecute(Bitmap bitmap) {
-            Log.v(TAG, "onPostExecute()");
-            super.onPostExecute(bitmap);
-
-            Log.v(TAG, "onPostExecute() - converting bitmap to byte array...");
-            try {
-                ByteArrayOutputStream os = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
-                byte[] data = os.toByteArray();
-                mMsg = mMsg + " - OK";
-                mIpCamListener.onGotImage(data,mMsg);
-            } catch (Exception e) {
-                Log.e(TAG, "Error in onPostExecute()");
-                e.printStackTrace();
-                mMsg = mMsg + " - ERROR retrieving IpCamera Image";
-                mIpCamListener.onGotImage(null,mMsg);
-            }
-        }
-
-
-        private Bitmap downloadImage(String url) {
-            byte[] result = null;
-            final DefaultHttpClient client = new DefaultHttpClient();
-            final HttpGet getRequest = new HttpGet(url);
-            try {
-                HttpResponse response = client.execute(getRequest);
-                final int statusCode = response.getStatusLine().getStatusCode();
-                if (statusCode != HttpStatus.SC_OK) {
-                    Log.w(TAG, "Error " + statusCode +
-                            " while retrieving bitmap from " + url);
-                    mMsg = mMsg + "Error Retrieving Bitmap from " + url + " Status Code = " + statusCode;
-                    return null;
-                }
-
-                final HttpEntity entity = response.getEntity();
-                if (entity != null) {
-                    InputStream inputStream = null;
-                    try {
-                        Log.v(TAG, "entity=" + entity.toString());
-                        // getting contents from the stream
-                        inputStream = entity.getContent();
-                        Log.v(TAG, "inputStrem=" + inputStream.toString());
-                        // decoding stream data back into image Bitmap that android understands
-                        final Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                        Log.v(TAG, "downloadImage() - Returning Bitmap");
-                        return bitmap;
-
-                        //inputStream.read(result);
-                        //return result;
-                    } finally {
-                        if (inputStream != null) {
-                            inputStream.close();
-                        }
-                        entity.consumeContent();
-                    }
-                }
-            } catch (Exception e) {
-                // You Could provide a more explicit error message for IOException
-                getRequest.abort();
-                Log.e(TAG, "Something went wrong while" +
-                        " retrieving bitmap from " + url + ": Error is: " + e.toString());
-            }
-            return null;
-        }
-    }
-
 
     /**
-     * cameraMover - move the camera.   Call CameraMover.execute with an object {"IP Addres" (String), Direction (int)}
+     * getImgUrl - return the url to obtain a snapshot image from the camera - uses data stored in mUrlData,
+     * which will have been read from CameraUrlData.json.
+     * @param ipAddr - IP Addrss of Camera
+     * @param uname - Username
+     * @param passwd - Password
+     * @param cmdSet - Command Set for camera (an integer - the id in CameraUrlData.json
+     * @return
      */
-    private class CameraMover extends AsyncTask<Object, Void, Boolean> {
-        @Override
-        protected Boolean doInBackground(Object... params) {
-            Log.v(TAG, "doInBackground - calling moveCamera(" + params[0] + ")");
-            //try {Thread.sleep(10000);} catch(Exception e) {Log.v(TAG,"Exception during sleep - "+e.toString());}
-            boolean retVal = moveCamera((String) params[0], (int) params[1]);
-            Log.v(TAG, "doInBackground - returned from moveCamera()");
-            return retVal;
-        }
+    public String getImgUrl(String ipAddr, String uname, String passwd, int cmdSet) {
+        int id = -1;
+        String imgCmd = "";
+        String userCmd = "";
+        String pwdCmd = "";
+        //Log.v(TAG, "getImgUrl() - cmdSet = " + cmdSet);
+        String url = "";
 
-        @Override
-        protected void onPreExecute() {
-            Log.v(TAG, "onPreExecute()");
-        }
-
-        @Override
-        protected void onPostExecute(Boolean retVal) {
-            Log.v(TAG, "onPostExecute()");
-            super.onPostExecute(retVal);
-            mIpCamListener.onGotImage(null, mMsg);
-        }
-
-
-        private boolean moveCamera(String ipAddress, int direction) {
-            String url = "http://" + ipAddress + "?decoder_control.cgi";
-            byte[] result = null;
-            final DefaultHttpClient client = new DefaultHttpClient();
-            final HttpGet getRequest = new HttpGet(url);
-            try {
-                HttpResponse response = client.execute(getRequest);
-                final int statusCode = response.getStatusLine().getStatusCode();
-                if (statusCode != HttpStatus.SC_OK) {
-                    Log.w(TAG, "Error " + statusCode +
-                            " moving camera using " + url);
-                    mMsg = mMsg + "Error moving camera using " + url + " Status Code = " + statusCode;
-                    return false;
+        try {
+            JSONArray urlDataArray = mUrlData.getJSONArray("urlArr");
+            id = -1;
+            int i = 0;
+            while (i < urlDataArray.length()) {
+                JSONObject urlData = urlDataArray.getJSONObject(i);
+                id = urlData.getInt("id");
+                //Log.v(TAG,"getImgUrl - id="+id);
+                imgCmd = urlData.getString("img");
+                userCmd = urlData.getString("userVar");
+                pwdCmd = urlData.getString("passwdVar");
+                if (id == cmdSet) {
+                    //Log.v(TAG, "found cmdSet");
+                    break;
                 }
-
-            } catch (Exception e) {
-                // You Could provide a more explicit error message for IOException
-                getRequest.abort();
-                Log.e(TAG, "Something went wrong while" +
-                        " moving camera " + url + ": Error is: " + e.toString());
-                return false;
+                i++;
             }
-            return true;
-        }
-    }
+        } catch (JSONException e) {
+            Log.e(TAG, "getImgUrl() - ERROR interpreting mUrlData");
+            e.printStackTrace();
 
+        }
+        //Log.v(TAG,"getImgUrl - id="+id);
+
+        url = "http://" + ipAddr + imgCmd + "?" + userCmd + "=" + mUname + "&" + pwdCmd + "=" + mPasswd;
+
+        //Log.v(TAG, "getImgUrl() - returning " + url);
+        return url;
+    }
 
     /**
-     * cameraFinder - scan the local network for an IP camera, and return the IP address of the camera by calling onCameraFound().
+     * getMoveUrl - return the url to move the camera - uses data stored in mUrlData,
+     * which will have been read from CameraUrlData.json.
+     *
+     * @param ipAddr    - IP Addrss of Camera
+     * @param uname     - Username
+     * @param passwd    - Password
+     * @param cmdSet    - Command Set for camera (an integer - the id in CameraUrlData.json
+     * @param direction - direction to move 0=left,1=up, 2=down, 3=right
+     * @return
      */
-    private class CameraFinder extends AsyncTask<String, Void, String> {
-        @Override
-        protected String doInBackground(String... params) {
-            String cameraIpAddr = null;
-            String phoneIpAddr = getLocalIpAddress();
-            Log.v(TAG, "doInBackground() - phone IP Address = " + phoneIpAddr);
-            String[] ipParts = phoneIpAddr.split("\\.");
-            String networkIpBase = ipParts[0] + "." + ipParts[1] + "." + ipParts[2] + ".";
-            Log.v(TAG, "doInBackground() - network Base = " + networkIpBase);
+    public String getMoveUrl(String ipAddr, String uname, String passwd, int cmdSet, int direction) {
+        int id = -1;
+        String moveBase = "";
+        String moveLeft = "";
+        String moveUp = "";
+        String moveDown = "";
+        String moveRight = "";
+        String moveCentre = "";
+        String moveExtra = "";
+        String userCmd = "";
+        String pwdCmd = "";
+        //Log.v(TAG, "getMoveUrl() - cmdSet = " + cmdSet);
+        String url = "";
 
-            for (int i = 1; i <= 255; i++) {
-                String testIpAddr = networkIpBase + i;
-                Log.v(TAG, "doInBackground() - testing " + testIpAddr);
-                if (isCamera(testIpAddr)) {
-                    Log.d(TAG, "doInBackground() - found Camera at " + testIpAddr);
-                    cameraIpAddr = testIpAddr;
+        try {
+            JSONArray urlDataArray = mUrlData.getJSONArray("urlArr");
+            id = -1;
+            int i = 0;
+            while (i < urlDataArray.length()) {
+                JSONObject urlData = urlDataArray.getJSONObject(i);
+                id = urlData.getInt("id");
+                //Log.v(TAG,"getMoveUrl - id="+id);
+                moveBase = urlData.getString("moveBase");
+                moveLeft = urlData.getString("moveLeft");
+                moveUp = urlData.getString("moveUp");
+                moveDown = urlData.getString("moveDown");
+                moveRight = urlData.getString("moveRight");
+                moveCentre = urlData.getString("moveCentre");
+                moveExtra = urlData.getString("moveExtra");
+                userCmd = urlData.getString("userVar");
+                pwdCmd = urlData.getString("passwdVar");
+                if (id == cmdSet) {
+                    //Log.v(TAG, "found cmdSet");
+                    break;
                 }
+                i++;
             }
+        } catch (JSONException e) {
+            Log.e(TAG, "getMoveUrl() - ERROR interpreting mUrlData");
+            e.printStackTrace();
 
-            return cameraIpAddr;
+        }
+        //Log.v(TAG,"getMoveUrl - id="+id);
+
+        // Get the correct direction string.
+        String dirStr;
+        switch (direction) {
+            case 0:
+                dirStr = moveLeft;
+                break;
+            case 1:
+                dirStr = moveUp;
+                break;
+            case 2:
+                dirStr = moveDown;
+                break;
+            case 3:
+                dirStr = moveRight;
+                break;
+            case 4:
+                dirStr = moveCentre;
+                break;
+            default:
+                Log.e(TAG, "getMoveUrl() - unrecognised direction " + direction);
+                dirStr = "";
         }
 
-        @Override
-        protected void onPostExecute(String s) {
-            super.onPostExecute(s);
-            Log.v(TAG, "onPostExecute() - Camera IP Address = " + s);
-            mIpCamListener.onGotImage(null, s);
-        }
+        url = "http://" + ipAddr + moveBase + dirStr + "&" + moveExtra + "&" + userCmd + "=" + mUname + "&" + pwdCmd + "=" + mPasswd;
 
-        private boolean isCamera(String ipAddr) {
-            String url = "http://" + ipAddr + "/snapshot.cgi?user=guest&pwd=guest";
-            Log.v(TAG, "isCamera() - url = " + url);
-            HttpParams httpParams = new BasicHttpParams();
-            HttpConnectionParams.setConnectionTimeout(httpParams, 3000);
-            HttpConnectionParams.setSoTimeout(httpParams, 3000);
-            final DefaultHttpClient client = new DefaultHttpClient(httpParams);
-            final HttpGet getRequest = new HttpGet(url);
-            try {
-                HttpResponse response = client.execute(getRequest);
-                final int statusCode = response.getStatusLine().getStatusCode();
-                if (statusCode != HttpStatus.SC_OK) {
-                    Log.d(TAG, "IP Address " + ipAddr + "gave status code " + statusCode);
-                    return false;
-                } else {
-                    Log.d(TAG, "CAMERA FOUND AT IP Address " + ipAddr + "(status code " + statusCode + ")");
-                    return true;
-                }
-            } catch (Exception e) {
-                Log.d(TAG, "IP Address " + ipAddr + " connection failed");
-                //e.printStackTrace();
-                return false;
-            }
-        }
+        Log.v(TAG, "getMoveUrl() - returning " + url);
+        return url;
     }
+
 
     /**
      * get the ip address of the phone.
@@ -331,4 +303,275 @@ public class IpCamController {
     }
 
 
+    /**
+     * Read the data to construct camera control URLs from the "CameraUrlData.json" file in the assets folder.
+     * Returns a JSONObject containing the data.
+     *
+     * @return JSONObject containing data read from the CameraUrlData.json file in assets.
+     */
+    private JSONObject getUrlData() {
+        String jsonStr = null;
+        try {
+            InputStream is = mContext.getAssets().open("CameraUrlData.json");
+            int size = is.available();
+            byte[] buffer = new byte[size];
+            is.read(buffer);
+            is.close();
+            jsonStr = new String(buffer, "UTF-8");
+            Log.v(TAG, "Read JSON from file:" + jsonStr);
+            JSONObject jsonObject = new JSONObject(jsonStr);
+            Log.v(TAG, "Returning JSONObject");
+            return jsonObject;
+        } catch (IOException e) {
+            e.printStackTrace();
+            Log.v(TAG, "getUrlData(): Error Reading CameraUrlData.json");
+            return null;
+        } catch (JSONException e) {
+            e.printStackTrace();
+            Log.v(TAG, "getUrlData(): Error Parsing JSON data.");
+            return null;
+        }
+    }
+
+
+    /**
+     * imageDownloader - based on http://javatechig.com/android/download-image-using-asynctask-in-android
+     */
+    private class ImageDownloader extends AsyncTask<String, Void, Bitmap> {
+        @Override
+        protected Bitmap doInBackground(String... params) {
+            //Log.v(TAG, "doInBackground - calling downloadImage(" + params[0] + ")");
+            //try {Thread.sleep(10000);} catch(Exception e) {Log.v(TAG,"Exception during sleep - "+e.toString());}
+            Bitmap bitmap = (Bitmap) downloadImage((String) params[0]);
+            //Log.v(TAG, "doInBackground - returned from downloadImage()");
+            return bitmap;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            //Log.v(TAG, "onPreExecute()");
+        }
+
+        @Override
+        protected void onPostExecute(Bitmap bitmap) {
+            //Log.v(TAG, "onPostExecute()");
+            super.onPostExecute(bitmap);
+            byte[] data;
+            Log.v(TAG, "onPostExecute() - converting bitmap to byte array...");
+            try {
+                if (bitmap != null) {
+                    ByteArrayOutputStream os = new ByteArrayOutputStream();
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, os);
+                    data = os.toByteArray();
+                    mMsg = mMsg + " - OK";
+                } else {
+                    mMsg = mMsg + " - null image recieved";
+                    data = null;
+                }
+                mReady = true;
+                mIpCamListener.onGotImage(data, mMsg);
+            } catch (Exception e) {
+                Log.e(TAG, "Error in onPostExecute()");
+                e.printStackTrace();
+                mMsg = mMsg + " - ERROR retrieving IpCamera Image";
+                mIpCamListener.onGotImage(null, mMsg);
+            }
+        }
+
+
+        private Bitmap downloadImage(String url) {
+            byte[] result = null;
+            final DefaultHttpClient client = new DefaultHttpClient();
+            final HttpGet getRequest = new HttpGet(url);
+            try {
+                HttpResponse response = client.execute(getRequest);
+                final int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode != HttpStatus.SC_OK) {
+                    Log.w(TAG, "Error " + statusCode +
+                            " while retrieving bitmap from " + url);
+                    mMsg = mMsg + "Error Retrieving Bitmap from " + url + " Status Code = " + statusCode;
+                    return null;
+                }
+
+                final HttpEntity entity = response.getEntity();
+                if (entity != null) {
+                    InputStream inputStream = null;
+                    try {
+                        // getting contents from the stream
+                        inputStream = entity.getContent();
+                        // decoding stream data back into image Bitmap that android understands
+                        final Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                        Log.v(TAG, "downloadImage() - Returning Bitmap");
+                        return bitmap;
+
+                        //inputStream.read(result);
+                        //return result;
+                    } finally {
+                        if (inputStream != null) {
+                            inputStream.close();
+                        }
+                        entity.consumeContent();
+                    }
+                }
+            } catch (Exception e) {
+                // You Could provide a more explicit error message for IOException
+                getRequest.abort();
+                Log.e(TAG, "Something went wrong while" +
+                        " retrieving bitmap from " + url + ": Error is: " + e.toString());
+            }
+            return null;
+        }
+    }
+
+    /**
+     * cameraMover - move the camera.   Call CameraMover.execute with an object {"IP Addres" (String), Direction (int)}
+     */
+    private class CameraMover extends AsyncTask<Object, Void, Boolean> {
+        @Override
+        protected Boolean doInBackground(Object... params) {
+            Log.v(TAG, "doInBackground - calling moveCamera(" + params[0] + ")");
+            //try {Thread.sleep(10000);} catch(Exception e) {Log.v(TAG,"Exception during sleep - "+e.toString());}
+            boolean retVal = moveCamera((String) params[0], (int) params[1]);
+            Log.v(TAG, "doInBackground - returned from moveCamera()");
+            return retVal;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            //Log.v(TAG, "onPreExecute()");
+        }
+
+        @Override
+        protected void onPostExecute(Boolean retVal) {
+            //Log.v(TAG, "onPostExecute()");
+            super.onPostExecute(retVal);
+            mReady = true;
+            mIpCamListener.onGotImage(null, mMsg);
+        }
+
+
+        private boolean moveCamera(String ipAddress, int direction) {
+            String url = getMoveUrl(ipAddress, mUname, mPasswd, mCmdSet, direction);
+            byte[] result = null;
+            final DefaultHttpClient client = new DefaultHttpClient();
+            final HttpGet getRequest = new HttpGet(url);
+            try {
+                HttpResponse response = client.execute(getRequest);
+                final int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode != HttpStatus.SC_OK) {
+                    Log.w(TAG, "Error " + statusCode +
+                            " moving camera using " + url);
+                    mMsg = mMsg + "Error moving camera using " + url + " Status Code = " + statusCode;
+                    return false;
+                }
+
+            } catch (Exception e) {
+                // You Could provide a more explicit error message for IOException
+                getRequest.abort();
+                Log.e(TAG, "Something went wrong while" +
+                        " moving camera " + url + ": Error is: " + e.toString());
+                return false;
+            }
+            return true;
+        }
+    }
+
+    /**
+     * cameraFinder - scan the local network for an IP camera, and return the IP address of the camera by calling onCameraFound().
+     */
+    private class CameraFinder extends AsyncTask<String, Void, Boolean> {
+        @Override
+        protected Boolean doInBackground(String... params) {
+            String cameraIpAddr = null;
+            int cameraCmdSet = 0;
+
+            // find local network ip address
+            String phoneIpAddr = getLocalIpAddress();
+            Log.v(TAG, "doInBackground() - phone IP Address = " + phoneIpAddr);
+            String[] ipParts = phoneIpAddr.split("\\.");
+            String networkIpBase = ipParts[0] + "." + ipParts[1] + "." + ipParts[2] + ".";
+            Log.v(TAG, "doInBackground() - network Base = " + networkIpBase);
+
+            // Get timeouts from shared preferences.
+            SharedPreferences SP = PreferenceManager
+                    .getDefaultSharedPreferences(mContext);
+            String prefStr;
+            prefStr = SP.getString("ConnTimeout", "1000");
+            int connTimeout = Integer.parseInt(prefStr);
+            Log.v(TAG, "doInBackground() - connTimeout = " + connTimeout);
+            prefStr = SP.getString("SoTimeout", "1000");
+            int soTimeout = Integer.parseInt(prefStr);
+            Log.v(TAG, "doInBackground() - soTimeout = " + soTimeout);
+
+            JSONArray urlDataArray;
+            try {
+                urlDataArray = mUrlData.getJSONArray("urlArr");
+            } catch (Exception e) {
+                Log.v(TAG, "Error Accessing mUrlData");
+                urlDataArray = null;
+            }
+
+
+            if (urlDataArray != null) {
+                ipLoop:
+                for (int i = 1; i <= 255; i++) {
+                    String testIpAddr = networkIpBase + i;
+                    Log.v(TAG, "doInBackground() - testing " + testIpAddr + " with " + urlDataArray.length() + " command sets");
+                    for (int cmdSet = 0; cmdSet < urlDataArray.length(); cmdSet++) {
+                        if (isCamera(testIpAddr, cmdSet, mUname, mPasswd, connTimeout, soTimeout)) {
+                            Log.d(TAG, "doInBackground() - found Camera at " + testIpAddr);
+                            cameraIpAddr = testIpAddr;
+                            cameraCmdSet = cmdSet;
+                            break ipLoop;
+                        }
+                    }
+                }
+            }
+            if (cameraIpAddr != null) {
+                mIpAddr = cameraIpAddr;
+                mCmdSet = cameraCmdSet;
+                Log.d(TAG, "doInBackground() - setting camera to be " + mIpAddr + " using command set " + mCmdSet);
+                return true;
+            } else {
+                Log.d(TAG, "failed to find camera - not doing anything");
+                return false;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(Boolean s) {
+            super.onPostExecute(s);
+            //Log.v(TAG, "onPostExecute() - Camera IP Address = " + s);
+            mIpCamListener.onGotImage(null, "");
+        }
+
+        private boolean isCamera(String ipAddr, int cmdSet, String uname, String passwd, int connTimeout, int soTimeout) {
+            //String url = "http://" + ipAddr + "/snapshot.cgi?user=guest&pwd=guest";
+            String url = getImgUrl(ipAddr, uname, passwd, cmdSet);
+            Log.v(TAG, "isCamera() - url = " + url);
+            HttpParams httpParams = new BasicHttpParams();
+            HttpConnectionParams.setConnectionTimeout(httpParams, connTimeout);
+            HttpConnectionParams.setSoTimeout(httpParams, soTimeout);
+            final DefaultHttpClient client = new DefaultHttpClient(httpParams);
+            final HttpGet getRequest = new HttpGet(url);
+            try {
+                HttpResponse response = client.execute(getRequest);
+                final int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode != HttpStatus.SC_OK) {
+                    Log.d(TAG, "IP Address " + ipAddr + "gave status code " + statusCode);
+                    return false;
+                } else {
+                    Log.d(TAG, "CAMERA FOUND AT IP Address " + ipAddr + "(status code " + statusCode + ")");
+                    return true;
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "IP Address " + ipAddr + " connection failed");
+                //e.printStackTrace();
+                return false;
+            }
+        }
+    }
+
+
 }
+

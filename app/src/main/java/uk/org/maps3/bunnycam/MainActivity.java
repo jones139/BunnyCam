@@ -25,6 +25,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.Toast;
@@ -42,6 +43,11 @@ public class MainActivity extends ActionBarActivity
     private Intent sdServerIntent;
     private String versionName = "unknown";
     private Timer mUiTimer;
+    private int mUiTimerPeriod = 5000;
+    private String mIpAddress = null;
+    private String mUname = null;
+    private String mPasswd = null;
+    private int mCmdSet = 0;
 
     final Handler serverStatusHandler = new Handler();
     Messenger messenger = new Messenger(new ResponseHandler());
@@ -93,33 +99,6 @@ public class MainActivity extends ActionBarActivity
             }
         });
 
-        final Button findCameraButton = (Button) findViewById(R.id.findCameraButton);
-        findCameraButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Log.v(TAG, "findCameraButton.onClickListener()");
-                findCameraButton.setText("Searching for Camera....");
-                findCameraButton.setEnabled(false);
-                IpCamController ipcc = new IpCamController("null", "guest", "guest", 0, new IpCamListener() {
-                    @Override
-                    public void onGotImage(byte[] img, String msg) {
-                        Log.v(TAG, "onGotImage() - msg is : " + msg);
-                        makeToast("Camera found at Address " + msg);
-                        findCameraButton.setText("Find Camera");
-                        findCameraButton.setEnabled(true);
-                        SharedPreferences SP = PreferenceManager
-                                .getDefaultSharedPreferences(getBaseContext());
-                        SharedPreferences.Editor editor = SP.edit();
-                        //mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/snapshot.cgi");
-                        editor.putString("ipCameraUrl", "http://" + msg + "/snapshot.cgi");
-                        editor.apply();
-                        editor.commit();
-                        mSdServer.updatePrefs();
-                    }
-                });
-                ipcc.findCamera();
-            }
-        });
 
         Button b;
         b = (Button) findViewById(R.id.leftButton);
@@ -132,6 +111,9 @@ public class MainActivity extends ActionBarActivity
         b.setOnClickListener(new CameraPanTiltOnClickListener());
 
         mUiTimer = new Timer();
+
+        // Prevent screen from blanking so we can see the images.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     /**
@@ -163,6 +145,10 @@ public class MainActivity extends ActionBarActivity
                     bindToServer();
                 }
                 return true;
+            case R.id.action_find_camera:
+                Log.v(TAG, "Find Camera");
+                findCamera();
+                return true;
             case R.id.action_settings:
                 Log.v(TAG,"action_settings");
                 try {
@@ -185,14 +171,16 @@ public class MainActivity extends ActionBarActivity
         Log.v(TAG,"onStart()");
         SharedPreferences SP = PreferenceManager
                 .getDefaultSharedPreferences(getBaseContext());
-        int uiTimerPeriod = SP.getInt("uiTimerPeriod", 5000);
+        String prefStr = null;
+        prefStr = SP.getString("uiUpdatePeriod", "5000");
+        mUiTimerPeriod = Integer.parseInt(prefStr);
         // start timer to refresh user interface every 5 seconds
         mUiTimer.schedule(new TimerTask() {
             @Override
             public void run() {
                 updateUI();
             }
-        }, 0, uiTimerPeriod);
+        }, 0, mUiTimerPeriod);
 
 
 
@@ -283,6 +271,28 @@ public class MainActivity extends ActionBarActivity
         }
     }
 
+    private void findCamera() {
+        Log.v(TAG, "findCamera()");
+        IpCamController ipcc = new IpCamController(getApplicationContext(), "null", "guest", "guest", 0, new IpCamListener() {
+            @Override
+            public void onGotImage(byte[] img, String msg) {
+                Log.v(TAG, "onGotImage() - msg is : " + msg);
+                makeToast("Camera found at Address " + msg);
+                SharedPreferences SP = PreferenceManager
+                        .getDefaultSharedPreferences(getBaseContext());
+                SharedPreferences.Editor editor = SP.edit();
+                //mIpCameraUrl = SP.getString("ipCameraUrl", "http://192.168.1.27/snapshot.cgi");
+                editor.putString("ipCameraUrl", msg);
+                //editor.apply();
+                editor.commit();
+                mSdServer.updatePrefs();
+            }
+        });
+        ipcc.findCamera();
+    }
+
+
+
     /**
      * Start the SdServer service
      */
@@ -363,12 +373,23 @@ public class MainActivity extends ActionBarActivity
     final Runnable uiRunnable = new Runnable() {
         public void run() {
             Log.v(TAG, "uiRunnable()");
+            final ImageView imageView = (ImageView) findViewById(R.id.imageView);
+
+            // Get a new image from the IpCam Controller
             if (mSdServer != null) {
-                if (mSdServer.mLatestImage != null) {
-                    ImageView imageView = (ImageView) findViewById(R.id.imageView);
-                    Bitmap bm = BitmapFactory.decodeByteArray(mSdServer.mLatestImage, 0, mSdServer.mLatestImage.length);
-                    imageView.setImageBitmap(bm);
-                }
+                IpCamController ipcc = new IpCamController(getApplicationContext(),
+                        mSdServer.mIpCameraIpAddress,
+                        mSdServer.mIpCameraUname,
+                        mSdServer.mIpCameraPasswd,
+                        mSdServer.mIpCameraCmdSet,
+                        new IpCamListener() {
+                            @Override
+                            public void onGotImage(byte[] img, String msg) {
+                                Bitmap bm = BitmapFactory.decodeByteArray(img, 0, img.length);
+                                imageView.setImageBitmap(bm);
+                            }
+                        });
+                ipcc.getImage();
             }
         }
     };
@@ -397,15 +418,19 @@ public class MainActivity extends ActionBarActivity
             switch (v.getId()) {
                 case R.id.leftButton:
                     Log.v(TAG, "LeftButton");
+                    mSdServer.moveCamera(0);
                     break;
                 case R.id.upButton:
                     Log.v(TAG, "UpButton");
+                    mSdServer.moveCamera(1);
                     break;
                 case R.id.downButton:
                     Log.v(TAG, "DownButton");
+                    mSdServer.moveCamera(2);
                     break;
                 case R.id.rightButton:
                     Log.v(TAG, "RightButton");
+                    mSdServer.moveCamera(3);
                     break;
                 default:
                     Log.w(TAG, "Unknown Button Clicked!!!!");

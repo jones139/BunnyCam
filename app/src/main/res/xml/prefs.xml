@@ -11,10 +11,16 @@
         android:title="use Ip Camera"
         android:summary="Capture Images from IP Camera rather than phone camera" />
     <EditTextPreference
-        android:key="ipCameraUrl"
-        android:title="URL of IP Camera"
-        android:summary="URL of IP Camera"
-        android:defaultValue="http://192.168.1.27/getsnapshot.cgi" />
+        android:key="ipCameraIpAddress"
+        android:title="IP Address of IP Camera"
+        android:summary=""
+        android:defaultValue="192.168.1.27" />
+    <EditTextPreference
+        android:key="ipCameraCommandSet"
+        android:title="Command set for camera"
+        android:summary="0 = mjpeg camera, 1 = h.264 camera"
+        android:numeric="integer"
+        android:defaultValue="0" />
     <EditTextPreference
         android:key="ipCameraUname"
         android:title="User name for IP Camera"
